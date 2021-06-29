@@ -1,0 +1,36 @@
+x-vector
+cluster
+F_clean_hdgs
+post process
+File               DER    JER    B3-Precision    B3-Recall    B3-F1    GKT(ref, sys)    GKT(sys, ref)    H(ref|sys)    H(sys|ref)    MI    NMI
+---------------  -----  -----  --------------  -----------  -------  ---------------  ---------------  ------------  ------------  ----  -----
+F_clean_hdgs      3.98   9.12            0.90         0.91     0.90             0.85             0.83          0.37          0.27  1.15   0.78
+*** OVERALL ***   3.98   9.12            0.90         0.91     0.90             0.85             0.83          0.37          0.27  1.15   0.78
+plot st
+x-vector
+cluster
+M_clean_yztj
+post process
+File               DER    JER    B3-Precision    B3-Recall    B3-F1    GKT(ref, sys)    GKT(sys, ref)    H(ref|sys)    H(sys|ref)    MI    NMI
+---------------  -----  -----  --------------  -----------  -------  ---------------  ---------------  ------------  ------------  ----  -----
+M_clean_yztj      8.15  14.43            0.87         0.90     0.89             0.86             0.81          0.41          0.28  1.30   0.79
+*** OVERALL ***   8.15  14.43            0.87         0.90     0.89             0.86             0.81          0.41          0.28  1.30   0.79
+plot st
+x-vector
+cluster
+M_echo_sjzm
+post process
+File               DER    JER    B3-Precision    B3-Recall    B3-F1    GKT(ref, sys)    GKT(sys, ref)    H(ref|sys)    H(sys|ref)    MI    NMI
+---------------  -----  -----  --------------  -----------  -------  ---------------  ---------------  ------------  ------------  ----  -----
+M_echo_sjzm       2.34   5.09            0.95         0.96     0.96             0.94             0.93          0.17          0.14  1.44   0.90
+*** OVERALL ***   2.34   5.09            0.95         0.96     0.96             0.94             0.93          0.17          0.14  1.44   0.90
+plot st
+x-vector
+cluster
+M_lowvol_sjxdg
+post process
+File               DER    JER    B3-Precision    B3-Recall    B3-F1    GKT(ref, sys)    GKT(sys, ref)    H(ref|sys)    H(sys|ref)    MI    NMI
+---------------  -----  -----  --------------  -----------  -------  ---------------  ---------------  ------------  ------------  ----  -----
+M_lowvol_sjxdg   28.65  51.48            0.73         0.72     0.72             0.56             0.57          0.69          0.66  0.86   0.56
+*** OVERALL ***  28.65  51.48            0.73         0.72     0.72             0.56             0.57          0.69          0.66  0.86   0.56
+plot st
