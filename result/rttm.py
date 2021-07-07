@@ -20,6 +20,7 @@ from dataclasses import dataclass
 import csv
 import numpy as np
 import result.show_st
+import re
 
 @dataclass
 class Rttm:
@@ -79,6 +80,22 @@ def write_tsv(rows, out_file_path):
   with open(out_file_path, 'w') as f:
     writer = csv.writer(f, delimiter='\t')
     writer.writerows(rows)
+
+def write_lab(rows, out_file_path):
+  with open(out_file_path, 'w') as f:
+    writer = csv.writer(f, delimiter=' ')
+    writer.writerows(rows)
+
+def load_lab(in_file_path):
+  rows = []
+  with open(in_file_path) as f:
+    for line in f:
+      line = line.strip()
+      if not line:
+        continue
+      parts = re.split(r'\s+', line)
+      rows.append((float(parts[0]), float(parts[1])))
+  return rows
 
 
 def group_by(xs, get_key):
@@ -256,6 +273,28 @@ def align_sys_rttm_majority(in_file_path, out_file_path):
 
   write_rttm(new_rows, out_file_path)
 
+def intersection(start1, stop1, tag1, start2, stop2, tag2):
+  (start1, stop1, tag1), (start2, stop2, tag2) = sorted([(start1, stop1, tag1), (start2, stop2, tag2)])
+  if stop1 > start2:
+    a = (start1, start2, tag1)
+    b = (start2, min(stop1, stop2), 'intersection')
+    if stop1 <= stop2:
+      c = (stop1, stop2, tag2)
+    else:
+      c = (stop2, stop1, tag1)
+    assert a[0] <= a[1] <= b[0] <= b[1] <= c[0] <= c[1]
+    returns = []
+    for x in (a, b, c):
+      start, stop, speaker = x
+      if np.abs(stop - start) <= 1e-6:
+        pass
+      else:
+        returns.append(x)
+    return returns
+
+  else:
+    return None
+
 def st_intersection(start1, stop1, tag1, start2, stop2, tag2):
   (start1, stop1, tag1), (start2, stop2, tag2) = sorted([(start1, stop1, tag1), (start2, stop2, tag2)])
   if stop1 > start2:
@@ -385,6 +424,67 @@ def merge_adjacent_of_same_speaker(xs, merged):
   merged.append(h)
   return merge_adjacent_of_same_speaker(t, merged)
 
+# def merge_vad(xs, merged):
+#   xs.sort()
+#   if not xs:
+#     return merged
+#
+#   h = start1, stop1 = xs[0]
+#   t = xs[1:]
+#
+#   # try to find a merge-able neighbour
+#   for i, (start2, stop2) in enumerate(t):
+#     if stop1 + 1 >= start2:
+#       # found a neighbour, merge them
+#       new = (start1, max(stop1, stop2))
+#       # two becomes one: head is dropped, i is dropped, new is added
+#       t.pop(i)
+#       # new is still subject to merge
+#       t.append(new)
+#       return merge_vad(t, merged)
+#
+#   merged.append(h)
+#   return merge_vad(t, merged)
+
+
+def merge_vad(xs, merged):
+  while xs:
+    xs.sort()
+
+    h = start1, stop1 = xs[0]
+    t = xs[1:]
+
+    breaked = False
+
+    # try to find a merge-able neighbour
+    for i, (start2, stop2) in enumerate(t):
+      if stop1 + 1.2 >= start2:
+        # found a neighbour, merge them
+        new = (start1, max(stop1, stop2))
+        # two becomes one: head is dropped, i is dropped, new is added
+        t.pop(i)
+        # new is still subject to merge
+        t.append(new)
+        xs = t
+        breaked = True
+        break
+    if breaked:
+      continue
+    merged.append(h)
+    xs = t
+
+  return merged
+
+def merge_vad_file(in_file_path, out_file_path):
+  rows = load_lab(in_file_path)
+  rows.sort()
+  rows = merge_vad(rows, [])
+  rows = [
+    (a, b, 'sp')
+    for a, b in rows
+  ]
+  write_lab(rows, out_file_path)
+
 
 def plot_st(in_rttm_paths, save_path, hints=[]):
   rowss = [
@@ -402,6 +502,12 @@ def plot_st_cli(in_paths, save_path, hints):
   hints = hints.split(':')
   return plot_st(in_paths, save_path, hints)
 
+def lab_to_txt(in_file_path, out_file_path):
+  lab = load_lab(in_file_path)
+  rows = []
+  for start, stop in lab:
+    rows.append((start, stop, 'sp'))
+  write_tsv(rows, out_file_path)
   #%%
 # plot_st(
 #   [
