@@ -114,7 +114,7 @@ def group_by(xs, get_key):
     return groups
 
 
-def merge_rttm_by_adjacency(in_file_path, out_file_path):
+def merge_rttm_by_adjacency(in_file_path, out_file_path, threshold_ms):
     """
     Merge neighbours of distance less than 3 seconds.
     """
@@ -126,7 +126,7 @@ def merge_rttm_by_adjacency(in_file_path, out_file_path):
 
     new_rows = []
     for same_file in groups.values():
-        rows = merge_neighbour(same_file)
+        rows = merge_neighbour(same_file, threshold_ms)
         new_rows.extend(rows)
     # sort to restore the original order
     new_rows.sort()
@@ -142,9 +142,9 @@ def rttm_to_tsv(in_file_path, out_file_path):
     write_tsv(rows, out_file_path)
 
 
-def merge_neighbour(rows_with_index):
+def merge_neighbour(rows_with_index, threshold_ms):
+    threshold = threshold_ms / 1000
     while True:
-        threshold = 3
         merge = False
         breaked = False
         a = None
@@ -160,7 +160,7 @@ def merge_neighbour(rows_with_index):
                     (start1, stop1), (start2, stop2) = sorted(
                         [(row.start, row.stop), (row2.start, row2.stop)]
                     )
-                    if stop1 >= start2:
+                    if stop1 + 100 / 1000 >= start2:
                         merge = True
                     elif stop1 + threshold >= start2:
                         # these two are subject to merge, considering the other speaker
@@ -450,41 +450,41 @@ def merge_adjacent_of_same_speaker(xs, merged):
 #   return merge_vad(t, merged)
 
 
-def merge_vad(xs, merged):
-    while xs:
-        xs.sort()
-
-        h = start1, stop1 = xs[0]
-        t = xs[1:]
-
-        breaked = False
-
-        # try to find a merge-able neighbour
-        for i, (start2, stop2) in enumerate(t):
-            if stop1 + 1.2 >= start2:
-                # found a neighbour, merge them
-                new = (start1, max(stop1, stop2))
-                # two becomes one: head is dropped, i is dropped, new is added
-                t.pop(i)
-                # new is still subject to merge
-                t.append(new)
-                xs = t
-                breaked = True
-                break
-        if breaked:
-            continue
-        merged.append(h)
-        xs = t
-
-    return merged
-
-
-def merge_vad_file(in_file_path, out_file_path):
-    rows = load_lab(in_file_path)
-    rows.sort()
-    rows = merge_vad(rows, [])
-    rows = [(a, b, 'sp') for a, b in rows]
-    write_lab(rows, out_file_path)
+# def merge_vad(xs, merged):
+#     while xs:
+#         xs.sort()
+#
+#         h = start1, stop1 = xs[0]
+#         t = xs[1:]
+#
+#         breaked = False
+#
+#         # try to find a merge-able neighbour
+#         for i, (start2, stop2) in enumerate(t):
+#             if stop1 + 1.2 >= start2:
+#                 # found a neighbour, merge them
+#                 new = (start1, max(stop1, stop2))
+#                 # two becomes one: head is dropped, i is dropped, new is added
+#                 t.pop(i)
+#                 # new is still subject to merge
+#                 t.append(new)
+#                 xs = t
+#                 breaked = True
+#                 break
+#         if breaked:
+#             continue
+#         merged.append(h)
+#         xs = t
+#
+#     return merged
+#
+#
+# def merge_vad_file(in_file_path, out_file_path):
+#     rows = load_lab(in_file_path)
+#     rows.sort()
+#     rows = merge_vad(rows, [])
+#     rows = [(a, b, 'sp') for a, b in rows]
+#     write_lab(rows, out_file_path)
 
 
 def plot_st(in_rttm_paths, save_path, hints=[]):
@@ -590,6 +590,7 @@ def has_intersection(start, stop, xs):
 
 @recursive
 def merge_interval(xs, merged):
+    # xs: list of triple
     xs.sort()
     if len(xs) == 0:
         merged.sort()
@@ -622,7 +623,7 @@ def merge_interval(xs, merged):
 def drop_short(xs):
     return [
         x for x in xs
-        if x[1] - x[0] > 250 / 1000
+        if x[1] - x[0] > 200 / 1000
     ]
 
 def diff_rttm(rttm_path_true, rttm_path_pred, out_csv_template_name):
