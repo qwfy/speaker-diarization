@@ -12,7 +12,7 @@ Speaker Name -- name of speaker of turn; should be unique within scope of each f
 Confidence Score -- system confidence (probability) that information is correct; should always be <NA>
 Signal Lookahead Time -- should always be <NA>
 """
-
+import copy
 import csv
 import os.path
 import re
@@ -24,6 +24,7 @@ from dataclasses import dataclass
 
 import result.show_st
 
+from recursive import recursive, TailCall
 
 @dataclass
 class Rttm:
@@ -508,7 +509,173 @@ def lab_to_txt(in_file_path, out_file_path):
         rows.append((start, stop, 'sp'))
     write_tsv(rows, out_file_path)
 
-    # %%
+@recursive
+def find_false_alarms(truths, preds, false_alarms):
+    if not preds:
+        # all predictions are consumed
+        return None
+    else:
+        h = start, stop, _ = preds[0]
+        t = preds[1:]
+
+        # try to find an intersection for h in truths
+        # if one is found, then the length of h is reduced by the intersection,
+        # in this case, we continue to process the rest of h
+        for start2, stop2, _ in truths:
+            intersections = intersection(start, stop, 'a', start2, stop2, 'b')
+            if intersections is None:
+                continue
+            else:
+                all_as = [x for x in intersections if x[2] == 'a']
+                if len(all_as) == 0:
+                    # the h is fully consumed, thus it is not a false alarm
+                    return TailCall(truths, t, false_alarms)
+                else:
+                    # the h is partially consumed, process the rest of h
+                    t.extend(all_as)
+                    return TailCall(truths, t, false_alarms)
+
+        # if no intersections are found for h, then h must be false alarm
+        false_alarms.append(h)
+        return TailCall(truths, t, false_alarms)
+
+def find_misses(truths, preds, misses):
+    return find_false_alarms(preds, truths, misses)
+
+@recursive
+def find_wrong_labels(truths, preds, wrongs):
+    if not preds:
+        return None
+    else:
+        h = (start, stop, speaker) = preds[0]
+        t = preds[1:]
+
+        for start2, stop2, speaker2 in truths:
+            intersections = intersection(start, stop, 'a', start2, stop2, 'b')
+            if intersections is None:
+                continue
+            else:
+                all_is = [x for x in intersections if x[2] == 'intersection']
+                for i_start, i_stop, _ in all_is:
+                    if speaker != speaker2:
+                        wrongs.append(
+                            (i_start, i_stop, speaker2 + '->' + speaker)
+                        )
+
+                all_as = [x for x in intersections if x[2] == 'a']
+                for i_start, i_stop, _ in all_as:
+                    if has_intersection(i_start, i_stop, truths):
+                        t.insert(0, (i_start, i_stop, speaker))
+
+                return TailCall(truths, t, wrongs)
+
+        # if we reached here without return,
+        # then there is no intersection with h,
+        # which means h is a false alarm,
+        # so drop it
+        return TailCall(truths, t, wrongs)
+
+
+def has_intersection(start, stop, xs):
+    for start2, stop2, _ in xs:
+        intersections = intersection(start, stop, 'a', start2, stop2, 'b')
+        if intersections is None:
+            continue
+        else:
+            for _, _, tag in intersections:
+                if tag == 'intersection':
+                    return True
+    return False
+
+
+@recursive
+def merge_interval(xs, merged):
+    xs.sort()
+    if len(xs) == 0:
+        merged.sort()
+        return
+    else:
+        h = (start1, stop1, tag1) = xs[0]
+        # tail with the same tag as the head
+        ht = [x for x in xs[1:] if x[2] == tag1]
+        # tail with the different tag as the head
+        tt = [x for x in xs[1:] if x[2] != tag1]
+        if not ht:
+            merged.append(h)
+            return TailCall(tt, merged)
+        else:
+            h2 = (start2, stop2, _) = ht[0]
+            ht = ht[1:]
+            (start1, stop1), (start2, stop2) = sorted([(start1, stop1), (start2, stop2)])
+            if stop1 >= start2:
+                # merge h and h2, consumes both
+                new_h = (start1, max(stop1, stop2), tag1)
+                ht.insert(0, new_h)
+                return TailCall(tt + ht, merged)
+            else:
+                # no need to merge head
+                merged.append(h)
+                # return back h2
+                ht.insert(0, h2)
+                return TailCall(tt + ht, merged)
+
+def drop_short(xs):
+    return [
+        x for x in xs
+        if x[1] - x[0] > 250 / 1000
+    ]
+
+def diff_rttm(rttm_path_true, rttm_path_pred, out_csv_template_name):
+    trues = load_rttm(rttm_path_true)
+    preds = load_rttm(rttm_path_pred)
+    trues = [(rttm.start, rttm.stop, rttm.speaker) for rttm in trues]
+    preds = [(rttm.start, rttm.stop, rttm.speaker) for rttm in preds]
+
+    trues_fa = copy.deepcopy(trues)
+    preds_fa = copy.deepcopy(preds)
+    _false_alarms = []
+    find_false_alarms(trues_fa, preds_fa, _false_alarms)
+    false_alarms = []
+    merge_interval(_false_alarms, false_alarms)
+    false_alarms = [(a, b, 'fa') for (a, b, _) in false_alarms]
+    false_alarms = drop_short(false_alarms)
+    total_fas = np.sum([b-a for a, b, _ in false_alarms])
+
+    trues_miss = copy.deepcopy(trues)
+    preds_miss = copy.deepcopy(preds)
+    _misses = []
+    find_misses(trues_miss, preds_miss, _misses)
+    misses = []
+    merge_interval(_misses, misses)
+    misses = [(a, b, 'miss') for (a, b, _) in misses]
+    misses = drop_short(misses)
+    total_misses = np.sum([b-a for a, b, _ in misses])
+
+
+    trues_wrong = copy.deepcopy(trues)
+    preds_wrong = copy.deepcopy(preds)
+    _wrongs = []
+    find_wrong_labels(trues_wrong, preds_wrong, _wrongs)
+    wrongs = []
+    merge_interval(_wrongs, wrongs)
+    wrongs = drop_short(wrongs)
+    total_wrongs = np.sum([b-a for a, b, _ in wrongs])
+
+    total_trues = np.sum([b-a for a, b, _ in trues])
+    total_preds = np.sum([b-a for a, b, _ in preds])
+    der = (total_fas + total_misses + total_wrongs) / (total_trues + total_preds)
+    print(f'FA    {total_fas:.4f}')
+    print(f'MISS  {total_misses:.4f}')
+    print(f'ERROR {total_wrongs:.4f}')
+    print(f'TRUE  {total_trues:.4f}')
+    print(f'PRED  {total_preds:.4f}')
+    print(f'RATIO {der:.4f}')
+
+    write_tsv(trues, out_csv_template_name + '.true.txt')
+    write_tsv(preds, out_csv_template_name + '.pred.txt')
+    write_tsv(false_alarms, out_csv_template_name + '.fa.txt')
+    write_tsv(misses, out_csv_template_name + '.miss.txt')
+    write_tsv(wrongs, out_csv_template_name + '.wrong.txt')
 
 
 # plot_st(
@@ -529,6 +696,7 @@ def lab_to_txt(in_file_path, out_file_path):
 #   'result/label_rttm_merged/M_clean_chenrushen_yuanzhutiji_stmerged.rttm.txt',
 # )
 # %%
+
 
 if __name__ == '__main__':
     fun_name = sys.argv[1]

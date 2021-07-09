@@ -3,12 +3,14 @@ from glob import glob
 import os
 import numpy as np
 import copy
+import itertools
 
 import result.rttm
 
 PUNCTUATIONS = ' 。，？！、'
+#%%
 
-def find_label(start, stop, rttms):
+def find_labels(start, stop, rttms):
     intersections = []
     for rttm in rttms:
         parts = result.rttm.intersection(start, stop, 'l', rttm.start, rttm.stop, 'r')
@@ -20,9 +22,47 @@ def find_label(start, stop, rttms):
                     intersections.append((istop - istart, rttm.speaker))
     intersections.sort(key=lambda x: x[0], reverse=True)
     if intersections:
-        return intersections[0][1]
+        return intersections
     else:
         return None
+
+
+class Visitor:
+    def __init__(self, sentences_with_words_tagged):
+        self._xs = sentences_with_words_tagged
+        self._visiting = 0
+        self.words_dropped = set()
+
+    def nexts(self):
+        if self._visiting + 1 > len(self._xs):
+            return None
+        else:
+            visiting = self._visiting
+            self._visiting += 1
+            sent = self._xs[visiting]
+            all_tags = set()
+            for word, tags in sent:
+                if tags is None:
+                    self.words_dropped.add(word['id'])
+                else:
+                    for tag in tags:
+                        all_tags.add(tag[1])
+
+            # no need to consider gap between the words,
+            # since the input arg
+            sents_tagged = []
+            for tag in all_tags:
+                words = []
+                for w, tags in sent:
+                    if tags:
+                        for _, tag1 in tags:
+                            if tag1 == tag:
+                                words.append(w)
+                                break
+                if words:
+                    sents_tagged.append((words, tag))
+            return sents_tagged
+
 
 
 for path in glob('result/vad_xf/*.transcript.json'):
@@ -31,6 +71,7 @@ for path in glob('result/vad_xf/*.transcript.json'):
         sentences = json.load(f)
 
     # break sentences into smaller chunks
+    # i.e. split on punctuations and large gaps
     word_id = 0
     new_sentences = []
     buf = []
@@ -64,6 +105,9 @@ for path in glob('result/vad_xf/*.transcript.json'):
     print(old_len, new_len)
     assert old_len == new_len
 
+    # make a copy for vad labelling
+    # (for at prod time, the only thing we know are the ends of the sentence,
+    # the label is unknown)
     vad_sentences = copy.deepcopy(new_sentences)
 
 
@@ -74,7 +118,7 @@ for path in glob('result/vad_xf/*.transcript.json'):
     rttm_path = os.path.join('result/label_rttm_raw', f'{file_id}.rttm')
     rttm = result.rttm.load_rttm(rttm_path)
 
-    # tag each word with label
+    # tag each word with one or more labels
     new_sentences_words_tagged = []
     for sentence in new_sentences:
         new_words = []
@@ -84,67 +128,21 @@ for path in glob('result/vad_xf/*.transcript.json'):
                 continue
             start = word['start_ms_audio_time'] / 1000
             stop = word['stop_ms_audio_time'] / 1000
-            label = find_label(start, stop, rttm)
+            labels = find_labels(start, stop, rttm)
             # note label could be None
-            new_words.append((word, label))
+            new_words.append((word, labels))
         if new_words:
             new_sentences_words_tagged.append(new_words)
 
-    # break words at speaker turn
+    # label sentences with labels
+    visitor = Visitor(new_sentences_words_tagged)
     new_sentences_sentence_tagged = []
-
-    buf = []
-    buf_speaker = None
-
-    def set_buf_speaker(spk):
-        global buf_speaker
-        if spk is not None:
-            buf_speaker = spk
-
-    words_dropped = []
-
-    for sent in new_sentences_words_tagged:
-        for (word, this_speaker) in sent:
-            if not buf:
-                buf.append(word)
-                set_buf_speaker(this_speaker)
-            else:
-                if this_speaker is None:
-                    buf.append(word)
-                    set_buf_speaker(this_speaker)
-                elif buf_speaker is None:
-                    buf.append(word)
-                    set_buf_speaker(this_speaker)
-                elif this_speaker == buf_speaker:
-                    buf.append(word)
-                    set_buf_speaker(this_speaker)
-                elif this_speaker != buf_speaker:
-                    assert buf_speaker is not None
-                    new_sentences_sentence_tagged.append((buf, buf_speaker))
-                    # start a new sentence
-                    buf = [word]
-                    buf_speaker = None
-                    set_buf_speaker(this_speaker)
-                else:
-                    assert False
-
-        # at the end of the sentence, we still clear the buffer
-        if buf:
-            if buf_speaker is None:
-                ends = [
-                    (w['start_ms_audio_time'], w['stop_ms_audio_time'])
-                    for w in buf
-                ]
-                start = ends[0][0] / 1000
-                stop = ends[-1][1] / 1000
-                text = ''.join(w['text'] for w in buf)
-                print(f'buf dropped due to no speaker: {stop - start:.4f} {start:.4f} {stop:.4f} {text}')
-                words_dropped.extend(buf)
-            else:
-                new_sentences_sentence_tagged.append((buf, buf_speaker))
-
-        buf = []
-        buf_speaker = None
+    while True:
+        nexts = visitor.nexts()
+        if nexts is None:
+            break
+        else:
+            new_sentences_sentence_tagged.extend(nexts)
 
     # write out rttm
     rttms = []
@@ -156,8 +154,11 @@ for path in glob('result/vad_xf/*.transcript.json'):
         # vads.append((start, stop))
     rttm_out_path = os.path.join('result/label_rttm_xf', f'{file_id}.rttm')
     result.rttm.write_rttm(rttms, rttm_out_path)
+    result.rttm.rttm_to_tsv(rttm_out_path, rttm_out_path + '.txt')
     adjacent_merged = os.path.join('result/label_rttm_xf_adjacent_merged', f'{file_id}.rttm')
     result.rttm.merge_rttm_by_adjacency(rttm_out_path, adjacent_merged)
+    result.rttm.rttm_to_tsv(adjacent_merged, adjacent_merged + '.txt')
+
     # vad using rttm
     # vad_out_path = os.path.join('result/vad_xf', f'{file_id}.lab')
     # result.rttm.write_lab(vads, vad_out_path)
@@ -169,12 +170,11 @@ for path in glob('result/vad_xf/*.transcript.json'):
     # however, to amend the missing human labels,
     # we drop those un-labeled segments from vad.
 
-    dropped_word_ids = set([x['id'] for x in words_dropped])
     new_vad_sentences = []
     for sent in vad_sentences:
         words = []
         for word in sent:
-            if word['id'] not in dropped_word_ids:
+            if word['id'] not in visitor.words_dropped:
                 words.append(word)
         if words:
             new_vad_sentences.append(words)
@@ -185,3 +185,21 @@ for path in glob('result/vad_xf/*.transcript.json'):
         vads.append((start, stop))
     vad_out_path = os.path.join('result/vad_xf', f'{file_id}.lab')
     result.rttm.write_lab(vads, vad_out_path)
+    result.rttm.write_tsv(vads, vad_out_path + '.txt')
+
+#%%
+
+for path in glob('result/vad_xf/*.transcript.json'):
+    print('processing', path)
+    with open(path) as f:
+        sentences = json.load(f)
+    rows = [
+        (x['words'][0]['start_ms_audio_time'] / 1000,
+        x['words'][-1]['stop_ms_audio_time'] / 1000,
+        x['text'])
+        for x in sentences
+    ]
+    basename = os.path.basename(path)
+    file_id = basename.split('.')[0]
+    tsv_path = os.path.join('result/vad_xf', f'{file_id}.transcript.txt')
+    result.rttm.write_tsv(rows, tsv_path)
