@@ -589,7 +589,7 @@ def has_intersection(start, stop, xs):
 
 
 @recursive
-def merge_interval(xs, merged):
+def merge_interval(xs, merged, tol):
     # xs: list of triple
     xs.sort()
     if len(xs) == 0:
@@ -603,22 +603,22 @@ def merge_interval(xs, merged):
         tt = [x for x in xs[1:] if x[2] != tag1]
         if not ht:
             merged.append(h)
-            return TailCall(tt, merged)
+            return TailCall(tt, merged, tol)
         else:
             h2 = (start2, stop2, _) = ht[0]
             ht = ht[1:]
             (start1, stop1), (start2, stop2) = sorted([(start1, stop1), (start2, stop2)])
-            if stop1 >= start2:
+            if stop1 + tol >= start2:
                 # merge h and h2, consumes both
                 new_h = (start1, max(stop1, stop2), tag1)
                 ht.insert(0, new_h)
-                return TailCall(tt + ht, merged)
+                return TailCall(tt + ht, merged, tol)
             else:
                 # no need to merge head
                 merged.append(h)
                 # return back h2
                 ht.insert(0, h2)
-                return TailCall(tt + ht, merged)
+                return TailCall(tt + ht, merged, tol)
 
 def drop_short(xs):
     return [

@@ -8,7 +8,7 @@ import itertools
 import result.rttm
 
 PUNCTUATIONS = ' 。，？！、'
-#%%
+
 
 def find_labels(start, stop, rttms):
     intersections = []
@@ -90,7 +90,7 @@ for path in glob('result/vad_xf/*.transcript.json'):
                     buf.append(word)
                     new_sentences.append(buf)
                     buf = []
-                elif last_stop + 3000 < w_start:
+                elif last_stop + 200 < w_start:
                     # start anew
                     new_sentences.append(buf)
                     buf = [word]
@@ -156,7 +156,7 @@ for path in glob('result/vad_xf/*.transcript.json'):
     result.rttm.write_rttm(rttms, rttm_out_path)
     result.rttm.rttm_to_tsv(rttm_out_path, rttm_out_path + '.txt')
     adjacent_merged = os.path.join('result/label_rttm_xf_adjacent_merged', f'{file_id}.rttm')
-    result.rttm.merge_rttm_by_adjacency(rttm_out_path, adjacent_merged)
+    result.rttm.merge_rttm_by_adjacency(rttm_out_path, adjacent_merged, threshold_ms=200)
     result.rttm.rttm_to_tsv(adjacent_merged, adjacent_merged + '.txt')
 
     # vad using rttm
@@ -203,3 +203,60 @@ for path in glob('result/vad_xf/*.transcript.json'):
     file_id = basename.split('.')[0]
     tsv_path = os.path.join('result/vad_xf', f'{file_id}.transcript.txt')
     result.rttm.write_tsv(rows, tsv_path)
+
+#%%
+import matplotlib.pyplot as plt
+#%%
+import result.rttm
+import importlib
+importlib.reload(result.rttm)
+#%%
+rows = []
+deltas = []
+for path in glob('result/vad_xf/*.lab'):
+    file_rows = result.rttm.load_lab(path)
+    new_file_rows = []
+    result.rttm.merge_interval([(a, b, 'a') for a, b in file_rows], new_file_rows, 0.2)
+    file_rows = [
+        (a, b)
+        for a, b, _ in new_file_rows
+    ]
+    rows.extend(file_rows)
+    file_rows.sort()
+    for (_, a), (b, _) in zip(file_rows[:-1], file_rows[1:]):
+        deltas.append(1000 * (b - a))
+lengths = [1000 * (b - a) for a, b in rows]
+# lengths = [x for x in lengths if x <= 2000]
+# deltas = [x for x in deltas if x <= ]
+#%%
+plt.hist([x for x in lengths if x < np.median(lengths)], bins=100)
+plt.show()
+#%%
+plt.hist([x for x in lengths if x > np.median(lengths)], bins=100)
+plt.show()
+#%%
+plt.hist([x for x in lengths if x < 20000], bins=100)
+plt.show()
+#%%
+plt.hist(lengths, bins=100)
+plt.show()
+#%%
+plt.hist(deltas, bins=100)
+plt.show()
+#%%
+plt.hist([x for x in deltas if x < np.median(deltas)], bins=100)
+plt.show()
+#%%
+plt.hist([x for x in deltas if x > np.median(deltas) and x < 15000], bins=100)
+plt.show()
+#%%
+plt.hist([x for x in deltas if x < 15000], bins=100)
+plt.show()
+#%%
+print('count lengths or short sentence', len(lengths))
+print('count lengths or gaps', len(deltas))
+#%%
+np.median(lengths), np.median(deltas)
+#%%
+
+# print(len([1 for x in lengths if x < np.median(lengths)]))
